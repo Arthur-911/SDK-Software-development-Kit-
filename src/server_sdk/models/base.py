@@ -1,4 +1,4 @@
-"""Base Pydantic model for all NASA SDK data structures."""
+"""Base Pydantic model for Server Developer Kit."""
 
 from __future__ import annotations
 
@@ -7,8 +7,8 @@ from typing import Any
 from pydantic import BaseModel, ConfigDict
 
 
-class NasaBaseModel(BaseModel):
-    """Base model with common configuration and serialization utilities."""
+class ServerBaseModel(BaseModel):
+    """Base model with common serialization utilities."""
 
     model_config = ConfigDict(
         populate_by_name=True,

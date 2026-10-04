@@ -1,12 +1,12 @@
-"""Exception hierarchy for the NASA Python SDK."""
+"""Exception hierarchy for the Server Developer Kit."""
 
 from __future__ import annotations
 
 from typing import Any
 
 
-class NasaError(Exception):
-    """Base exception for all NASA SDK errors."""
+class ServerSDKError(Exception):
+    """Base exception for all Server SDK errors."""
 
     def __init__(self, message: str) -> None:
         super().__init__(message)
@@ -16,14 +16,14 @@ class NasaError(Exception):
         return f"{self.__class__.__name__}(message={self.message!r})"
 
 
-class NasaAPIError(NasaError):
-    """Raised when the NASA API returns an HTTP error status code."""
+class APIError(ServerSDKError):
+    """Raised when the server returns an HTTP error status code."""
 
     def __init__(
         self,
         message: str,
         status_code: int,
-        response_body: Any | None = None,
+        response_body: Any = None,
     ) -> None:
         super().__init__(message)
         self.status_code = status_code
@@ -35,23 +35,23 @@ class NasaAPIError(NasaError):
         )
 
 
-class AuthenticationError(NasaAPIError):
-    """Raised when the API key is missing, invalid, or unauthorized (HTTP 401 / 403)."""
+class AuthenticationError(APIError):
+    """Raised when authentication credentials are missing, invalid, or expired (HTTP 401/403)."""
 
 
-class NotFoundError(NasaAPIError):
+class NotFoundError(APIError):
     """Raised when a requested resource is not found (HTTP 404)."""
 
 
-class RateLimitError(NasaAPIError):
-    """Raised when the API rate limit has been exceeded (HTTP 429)."""
+class RateLimitError(APIError):
+    """Raised when server rate limit has been exceeded (HTTP 429)."""
 
     def __init__(
         self,
         message: str,
         status_code: int = 429,
         retry_after: float | None = None,
-        response_body: Any | None = None,
+        response_body: Any = None,
     ) -> None:
         super().__init__(message, status_code=status_code, response_body=response_body)
         self.retry_after = retry_after
@@ -65,13 +65,13 @@ class RateLimitError(NasaAPIError):
         )
 
 
-class ServerError(NasaAPIError):
-    """Raised when NASA's servers return a 5xx error."""
+class ServerError(APIError):
+    """Raised when the backend server returns a 5xx error."""
 
 
-class TimeoutError(NasaError):
+class TimeoutError(ServerSDKError):
     """Raised when an HTTP request times out."""
 
 
-class ValidationError(NasaError):
-    """Raised when client-side parameter validation fails before sending the request."""
+class ValidationError(ServerSDKError):
+    """Raised when client-side parameter validation fails before sending a request."""

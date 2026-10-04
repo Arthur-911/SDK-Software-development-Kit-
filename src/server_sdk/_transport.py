@@ -1,4 +1,4 @@
-"""HTTP transport layer handling authentication, retries, and error mapping."""
+"""HTTP transport layer for Server Developer Kit."""
 
 from __future__ import annotations
 
@@ -8,17 +8,17 @@ from typing import Any
 
 import httpx
 
-from nasa_sdk.config import ClientConfig
-from nasa_sdk.exceptions import (
+from server_sdk.config import ClientConfig
+from server_sdk.exceptions import (
+    APIError,
     AuthenticationError,
-    NasaAPIError,
     NotFoundError,
     RateLimitError,
     ServerError,
     TimeoutError,
 )
 
-RETRYABLE_STATUS_CODES: tuple[int, ...] = (429, 500, 502, 503, 504)
+RETRYABLE_STATUS_CODES = (429, 500, 502, 503, 504)
 RETRYABLE_EXCEPTIONS = (
     httpx.ConnectError,
     httpx.ConnectTimeout,
@@ -39,7 +39,7 @@ def _extract_retry_after(headers: httpx.Headers) -> float | None:
 
 
 def _handle_response_error(response: httpx.Response) -> None:
-    """Parse error response and raise the corresponding typed NasaAPIError."""
+    """Parse error response and raise corresponding typed APIError."""
     status_code = response.status_code
     if status_code < 400:
         return
@@ -47,22 +47,21 @@ def _handle_response_error(response: httpx.Response) -> None:
     try:
         body: Any = response.json()
         if isinstance(body, dict):
-            # NASA APIs often return errors like {"error": {"message": ...}} or {"msg": ...}
             if "error" in body and isinstance(body["error"], dict):
                 message = body["error"].get("message") or body["error"].get("code") or str(body)
             elif "error_message" in body:
                 message = body["error_message"]
-            elif "msg" in body:
-                message = body["msg"]
+            elif "detail" in body:
+                message = body["detail"]
             elif "message" in body:
                 message = body["message"]
             else:
-                message = response.text or f"HTTP {status_code} error from NASA API"
+                message = response.text or f"HTTP {status_code} server error"
         else:
             message = str(body)
     except Exception:
         body = response.text
-        message = response.text or f"HTTP {status_code} error from NASA API"
+        message = response.text or f"HTTP {status_code} server error"
 
     if status_code in (401, 403):
         raise AuthenticationError(
@@ -86,13 +85,13 @@ def _handle_response_error(response: httpx.Response) -> None:
         )
     elif 500 <= status_code <= 599:
         raise ServerError(
-            message=f"NASA server error ({status_code}): {message}",
+            message=f"Server error ({status_code}): {message}",
             status_code=status_code,
             response_body=body,
         )
     else:
-        raise NasaAPIError(
-            message=f"NASA API error ({status_code}): {message}",
+        raise APIError(
+            message=f"API error ({status_code}): {message}",
             status_code=status_code,
             response_body=body,
         )
@@ -124,13 +123,15 @@ class SyncTransport:
         method: str,
         path: str,
         params: dict[str, Any] | None = None,
+        json: Any = None,
         headers: dict[str, str] | None = None,
         timeout: float | None = None,
-    ) -> dict[str, Any] | list[Any]:
+    ) -> Any:
         """Execute a sync HTTP request with exponential backoff retries."""
-        req_params: dict[str, Any] = dict(params or {})
-        if "api_key" not in req_params:
-            req_params["api_key"] = self.config.api_key
+        req_headers = dict(headers or {})
+        req_params = dict(params or {})
+
+        req_headers, req_params = self.config.auth.apply(req_headers, req_params)
 
         req_timeout = timeout or self.config.timeout
         full_url = (
@@ -146,7 +147,8 @@ class SyncTransport:
                     method=method,
                     url=full_url,
                     params=req_params,
-                    headers=headers,
+                    json=json,
+                    headers=req_headers,
                     timeout=req_timeout,
                 )
 
@@ -166,7 +168,7 @@ class SyncTransport:
                     continue
 
                 _handle_response_error(response)
-                json_data: dict[str, Any] | list[Any] = response.json()
+                json_data: Any = response.json()
                 return json_data
 
             except RETRYABLE_EXCEPTIONS as exc:
@@ -206,13 +208,15 @@ class AsyncTransport:
         method: str,
         path: str,
         params: dict[str, Any] | None = None,
+        json: Any = None,
         headers: dict[str, str] | None = None,
         timeout: float | None = None,
-    ) -> dict[str, Any] | list[Any]:
+    ) -> Any:
         """Execute an async HTTP request with exponential backoff retries."""
-        req_params: dict[str, Any] = dict(params or {})
-        if "api_key" not in req_params:
-            req_params["api_key"] = self.config.api_key
+        req_headers = dict(headers or {})
+        req_params = dict(params or {})
+
+        req_headers, req_params = self.config.auth.apply(req_headers, req_params)
 
         req_timeout = timeout or self.config.timeout
         full_url = (
@@ -228,7 +232,8 @@ class AsyncTransport:
                     method=method,
                     url=full_url,
                     params=req_params,
-                    headers=headers,
+                    json=json,
+                    headers=req_headers,
                     timeout=req_timeout,
                 )
 
@@ -248,7 +253,7 @@ class AsyncTransport:
                     continue
 
                 _handle_response_error(response)
-                json_data: dict[str, Any] | list[Any] = response.json()
+                json_data: Any = response.json()
                 return json_data
 
             except RETRYABLE_EXCEPTIONS as exc:

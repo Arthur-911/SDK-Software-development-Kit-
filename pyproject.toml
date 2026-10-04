@@ -3,9 +3,9 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [project]
-name = "nasa-sdk"
+name = "server-sdk"
 version = "0.1.0"
-description = "A modern, strongly-typed, and resilient Python SDK for NASA Open APIs."
+description = "A typed, resilient Python Server Developer Kit for backend services and REST APIs."
 readme = "README.md"
 requires-python = ">=3.9"
 license = "MIT"
@@ -13,16 +13,14 @@ authors = [
     { name = "SDK Engineering Team", email = "oss@example.com" },
 ]
 keywords = [
-    "nasa",
-    "apod",
-    "mars-rover",
-    "neows",
-    "space",
-    "astronomy",
-    "api-client",
     "sdk",
-    "asyncio",
+    "server",
+    "api-client",
+    "rest",
+    "backend",
     "pydantic",
+    "asyncio",
+    "httpx",
 ]
 classifiers = [
     "Development Status :: 4 - Beta",
@@ -30,12 +28,11 @@ classifiers = [
     "License :: OSI Approved :: MIT License",
     "Operating System :: OS Independent",
     "Programming Language :: Python :: 3",
-    "Programming Language :: Python :: 3.9",
     "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
     "Topic :: Software Development :: Libraries :: Python Modules",
-    "Topic :: Scientific/Engineering :: Astronomy",
+    "Topic :: Internet :: WWW/HTTP",
     "Typing :: Typed",
 ]
 dependencies = [
@@ -60,7 +57,7 @@ Issues = "https://github.com/Arthur-911/SDK-Software-development-Kit-/issues"
 Changelog = "https://github.com/Arthur-911/SDK-Software-development-Kit-/blob/main/CHANGELOG.md"
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/nasa_sdk"]
+packages = ["src/server_sdk"]
 
 [tool.ruff]
 line-length = 100
@@ -98,7 +95,7 @@ check_untyped_defs = true
 
 [tool.pytest.ini_options]
 minversion = "7.0"
-addopts = "-ra -q --cov=nasa_sdk --cov-report=term-missing --cov-report=xml --cov-fail-under=100"
+addopts = "-ra -q --cov=server_sdk --cov-report=term-missing --cov-report=xml --cov-fail-under=100"
 testpaths = ["tests"]
 asyncio_mode = "auto"
 filterwarnings = [
@@ -106,7 +103,7 @@ filterwarnings = [
 ]
 
 [tool.coverage.run]
-source = ["src/nasa_sdk"]
+source = ["src/server_sdk"]
 branch = true
 
 [tool.coverage.report]
