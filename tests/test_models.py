@@ -4,9 +4,11 @@ from __future__ import annotations
 
 import json
 
-from server_sdk.models.base import ServerBaseModel
-from server_sdk.models.health import HealthCheckResponse
-from server_sdk.models.system import ServerInfoResponse
+from server_sdk.models import (
+    HealthCheckResponse,
+    ServerBaseModel,
+    ServerInfoResponse,
+)
 
 
 def test_base_model_serialization() -> None:

@@ -44,16 +44,16 @@ def test_handle_response_error_variants() -> None:
     res_401 = httpx.Response(
         401, json={"error": {"message": "Invalid token", "code": "UNAUTHORIZED"}}
     )
-    with pytest.raises(AuthenticationError) as exc_info:
+    with pytest.raises(AuthenticationError) as exc_auth:
         _handle_response_error(res_401)
-    assert "Invalid token" in str(exc_info.value)
-    assert exc_info.value.status_code == 401
+    assert "Invalid token" in str(exc_auth.value)
+    assert exc_auth.value.status_code == 401
 
     # 403 error with {"error": {"code": "KEY_EXPIRED"}} (message absent)
     res_403 = httpx.Response(403, json={"error": {"code": "KEY_EXPIRED"}})
-    with pytest.raises(AuthenticationError) as exc_info:
+    with pytest.raises(AuthenticationError) as exc_403_info:
         _handle_response_error(res_403)
-    assert "KEY_EXPIRED" in str(exc_info.value)
+    assert "KEY_EXPIRED" in str(exc_403_info.value)
 
     # 403 error with {"error": "simple string"}
     res_403_str = httpx.Response(403, json={"error": "simple string error"})
@@ -62,23 +62,23 @@ def test_handle_response_error_variants() -> None:
 
     # 404 error with {"detail": "Resource not found"}
     res_404_detail = httpx.Response(404, json={"detail": "Resource not found"})
-    with pytest.raises(NotFoundError) as exc_info:
+    with pytest.raises(NotFoundError) as exc_404_detail:
         _handle_response_error(res_404_detail)
-    assert "Resource not found" in str(exc_info.value)
+    assert "Resource not found" in str(exc_404_detail.value)
 
     # 404 error with {"error_message": "User not found"}
     res_404 = httpx.Response(404, json={"error_message": "User not found"})
-    with pytest.raises(NotFoundError) as exc_info:
+    with pytest.raises(NotFoundError) as exc_404:
         _handle_response_error(res_404)
-    assert "User not found" in str(exc_info.value)
+    assert "User not found" in str(exc_404.value)
 
     # 429 error with {"message": "Rate limit exceeded"} and Retry-After header
     res_429 = httpx.Response(
         429, headers={"Retry-After": "5.0"}, json={"message": "Rate limit exceeded"}
     )
-    with pytest.raises(RateLimitError) as exc_info:
+    with pytest.raises(RateLimitError) as exc_rate:
         _handle_response_error(res_429)
-    assert exc_info.value.retry_after == 5.0
+    assert exc_rate.value.retry_after == 5.0
 
     # 500 error with {"message": "Internal error"}
     res_500 = httpx.Response(500, json={"message": "Internal failure"})
@@ -87,21 +87,21 @@ def test_handle_response_error_variants() -> None:
 
     # Generic error with other status and arbitrary JSON dict
     res_418_dict = httpx.Response(418, json={"custom": "teapot"})
-    with pytest.raises(APIError) as exc_info:
+    with pytest.raises(APIError) as exc_api_dict:
         _handle_response_error(res_418_dict)
-    assert exc_info.value.status_code == 418
+    assert exc_api_dict.value.status_code == 418
 
     # Generic error with non-dict json (e.g. list)
     res_418 = httpx.Response(418, json=["teapot error"])
-    with pytest.raises(APIError) as exc_info:
+    with pytest.raises(APIError) as exc_api:
         _handle_response_error(res_418)
-    assert exc_info.value.status_code == 418
+    assert exc_api.value.status_code == 418
 
     # Non-json response (HTML or plaintext)
     res_html = httpx.Response(502, text="<html>502 Bad Gateway</html>")
-    with pytest.raises(ServerError) as exc_info:
+    with pytest.raises(ServerError) as exc_server:
         _handle_response_error(res_html)
-    assert "502 Bad Gateway" in str(exc_info.value)
+    assert "502 Bad Gateway" in str(exc_server.value)
 
     # Empty body
     res_empty = httpx.Response(400, text="")

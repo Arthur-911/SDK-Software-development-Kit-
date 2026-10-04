@@ -10,8 +10,7 @@ import httpx
 from server_sdk._transport import SyncTransport
 from server_sdk.auth import AuthStrategy, NoAuth
 from server_sdk.config import ClientConfig
-from server_sdk.endpoints.health import HealthEndpoint
-from server_sdk.endpoints.system import SystemEndpoint
+from server_sdk.endpoints import HealthEndpoint, SystemEndpoint
 
 
 class ServerClient:
