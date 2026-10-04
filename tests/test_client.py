@@ -1,54 +1,73 @@
-"""Tests for top-level sync and async client lifecycles and string representations."""
+"""Tests for top-level sync and async ServerClient lifecycles and HTTP methods."""
 
 from __future__ import annotations
 
+import httpx
 import pytest
 
-from nasa_sdk import AsyncNasaClient, NasaClient
+from server_sdk import ApiKeyAuth, AsyncServerClient, BearerAuth, ServerClient
 
 
-def test_sync_client_lifecycle() -> None:
-    client = NasaClient(
-        api_key="very_long_secret_api_key_12345",
-        base_url="https://api.nasa.gov",
-        timeout=25.0,
-        max_retries=4,
-        backoff_factor=0.2,
-        headers={"X-Test": "Val"},
-    )
-    assert client.config.timeout == 25.0
-    assert client.config.max_retries == 4
-    assert client.config.backoff_factor == 0.2
-    assert "very..." in repr(client)
+def test_sync_client_methods() -> None:
+    calls: list[str] = []
 
-    # Test short api key repr
-    short_client = NasaClient(api_key="123")
-    assert "api_key='123'" in repr(short_client)
-    short_client.close()
+    def handler(request: httpx.Request) -> httpx.Response:
+        calls.append(f"{request.method} {request.url.path}")
+        return httpx.Response(200, json={"status": "ok"})
 
-    # Context manager
-    with client as c:
-        assert c is client
-    # Client is closed after exit
+    client = httpx.Client(transport=httpx.MockTransport(handler))
+    with ServerClient(
+        base_url="https://api.example.com",
+        auth=ApiKeyAuth(api_key="my-key"),
+        timeout=15.0,
+        max_retries=2,
+        backoff_factor=0.1,
+        http_client=client,
+    ) as server:
+        assert server.get("/users") == {"status": "ok"}
+        assert server.post("/users", json={"name": "Alice"}) == {"status": "ok"}
+        assert server.put("/users/1", json={"name": "Bob"}) == {"status": "ok"}
+        assert server.patch("/users/1", json={"name": "Charlie"}) == {"status": "ok"}
+        assert server.delete("/users/1") == {"status": "ok"}
+
+        assert "ServerClient(" in repr(server)
+        assert "base_url='https://api.example.com'" in repr(server)
+
+    assert calls == [
+        "GET /users",
+        "POST /users",
+        "PUT /users/1",
+        "PATCH /users/1",
+        "DELETE /users/1",
+    ]
 
 
 @pytest.mark.asyncio
-async def test_async_client_lifecycle() -> None:
-    client = AsyncNasaClient(
-        api_key="very_long_secret_async_api_key_9999",
-        base_url="https://api.nasa.gov",
-        timeout=18.0,
-        max_retries=2,
-        backoff_factor=0.1,
-    )
-    assert client.config.timeout == 18.0
-    assert "very..." in repr(client)
+async def test_async_client_methods() -> None:
+    calls: list[str] = []
 
-    # Test short key repr
-    short_async = AsyncNasaClient(api_key="abc")
-    assert "api_key='abc'" in repr(short_async)
-    await short_async.aclose()
+    def handler(request: httpx.Request) -> httpx.Response:
+        calls.append(f"{request.method} {request.url.path}")
+        return httpx.Response(200, json={"status": "async_ok"})
 
-    # Async context manager
-    async with client as c:
-        assert c is client
+    client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+    async with AsyncServerClient(
+        base_url="https://api.async.com",
+        auth=BearerAuth(token="jwt-token"),
+        http_client=client,
+    ) as server:
+        assert await server.get("/items") == {"status": "async_ok"}
+        assert await server.post("/items", json={"id": 1}) == {"status": "async_ok"}
+        assert await server.put("/items/1", json={"id": 1}) == {"status": "async_ok"}
+        assert await server.patch("/items/1", json={"id": 1}) == {"status": "async_ok"}
+        assert await server.delete("/items/1") == {"status": "async_ok"}
+
+        assert "AsyncServerClient(" in repr(server)
+
+    assert calls == [
+        "GET /items",
+        "POST /items",
+        "PUT /items/1",
+        "PATCH /items/1",
+        "DELETE /items/1",
+    ]

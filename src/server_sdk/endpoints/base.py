@@ -1,11 +1,11 @@
-"""Base endpoint classes for sync and async operations."""
+"""Base endpoint handlers for sync and async operations."""
 
 from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from nasa_sdk._transport import AsyncTransport, SyncTransport
+    from server_sdk._transport import AsyncTransport, SyncTransport
 
 
 class BaseEndpoint:

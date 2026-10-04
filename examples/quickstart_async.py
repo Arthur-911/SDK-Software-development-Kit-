@@ -1,29 +1,26 @@
-"""Asynchronous Concurrency Example for nasa-sdk."""
+"""Asynchronous concurrency example for Server Developer Kit."""
 
 from __future__ import annotations
 
 import asyncio
 
-from nasa_sdk import AsyncNasaClient
+from server_sdk import ApiKeyAuth, AsyncServerClient
 
 
 async def main() -> None:
-    async with AsyncNasaClient() as client:
-        print("Fetching APOD, Mars Rover photos, and Asteroid data concurrently...")
+    async with AsyncServerClient(
+        base_url="https://httpbin.org",
+        auth=ApiKeyAuth(api_key="internal-service-key"),
+    ) as client:
+        print("Sending concurrent server requests...")
 
-        # Fire multiple requests concurrently with asyncio.gather
-        apod_task = client.apod.get()
-        mars_task = client.mars_rover.get_photos(rover="curiosity", sol=1000)
-        manifest_task = client.mars_rover.get_manifest(rover="perseverance")
+        task_a = client.get("/get", params={"request": "profile"})
+        task_b = client.get("/get", params={"request": "permissions"})
 
-        apod, mars_photos, manifest = await asyncio.gather(
-            apod_task, mars_task, manifest_task
-        )
+        result_a, result_b = await asyncio.gather(task_a, task_b)
 
-        print("\n--- Results Received Concurrently ---")
-        print(f"APOD: {apod.title} ({apod.date})")
-        print(f"Mars Photos Found: {len(mars_photos)} images")
-        print(f"Perseverance Status: {manifest.status.upper()} (Total Photos: {manifest.total_photos})")
+        print(f"Request A URL: {result_a.get('args')}")
+        print(f"Request B URL: {result_b.get('args')}")
 
 
 if __name__ == "__main__":
