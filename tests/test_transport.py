@@ -8,8 +8,10 @@ import pytest
 from server_sdk._transport import (
     AsyncTransport,
     SyncTransport,
+    _calculate_sleep,
     _extract_retry_after,
     _handle_response_error,
+    _parse_response_data,
 )
 from server_sdk.auth import BearerAuth
 from server_sdk.config import ClientConfig
@@ -325,3 +327,89 @@ async def test_async_transport_timeout_exception() -> None:
 
     with pytest.raises(TimeoutError):
         await transport.request("GET", "/timeout")
+
+
+def test_calculate_sleep() -> None:
+    # Deterministic without jitter
+    assert _calculate_sleep(0.5, 0, jitter=False) == 0.5
+    assert _calculate_sleep(0.5, 2, jitter=False) == 2.0
+    # Explicit retry-after takes precedence
+    assert _calculate_sleep(0.5, 2, retry_after=7.5, jitter=False) == 7.5
+    # With jitter
+    sleep_val = _calculate_sleep(1.0, 1, jitter=True)
+    assert 1.0 <= sleep_val <= 2.0
+
+
+def test_parse_response_data() -> None:
+    # 204 No Content
+    res_204 = httpx.Response(204, content=b"")
+    assert _parse_response_data(res_204) is None
+
+    # 200 with empty body
+    res_empty = httpx.Response(200, content=b"")
+    assert _parse_response_data(res_empty) is None
+
+    # Application JSON
+    res_json = httpx.Response(
+        200,
+        headers={"Content-Type": "application/json"},
+        content=b'{"ok": true}',
+    )
+    assert _parse_response_data(res_json) == {"ok": True}
+
+    # Text / plain fallback
+    res_text = httpx.Response(
+        200,
+        headers={"Content-Type": "text/plain"},
+        content=b"pong plaintext",
+    )
+    assert _parse_response_data(res_text) == "pong plaintext"
+
+
+def test_non_retryable_method_fails_immediately() -> None:
+    attempts = 0
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal attempts
+        attempts += 1
+        return httpx.Response(500, json={"error": "db down"})
+
+    client = httpx.Client(transport=httpx.MockTransport(handler))
+    # POST is not in retry_methods by default
+    config = ClientConfig(max_retries=3, backoff_factor=0.01)
+    transport = SyncTransport(config=config, client=client)
+
+    with pytest.raises(ServerError):
+        transport.request("POST", "/create")
+
+    assert attempts == 1
+
+
+@pytest.mark.asyncio
+async def test_async_non_retryable_method_fails_immediately() -> None:
+    attempts = 0
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal attempts
+        attempts += 1
+        return httpx.Response(500, json={"error": "async db down"})
+
+    client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+    config = ClientConfig(max_retries=3, backoff_factor=0.01)
+    transport = AsyncTransport(config=config, client=client)
+
+    with pytest.raises(ServerError):
+        await transport.request("POST", "/async-create")
+
+    assert attempts == 1
+
+
+@pytest.mark.asyncio
+async def test_async_transport_204_and_empty() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(204)
+
+    client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+    transport = AsyncTransport(config=ClientConfig(), client=client)
+    res = await transport.request("DELETE", "/item/1")
+    assert res is None
