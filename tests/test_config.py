@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import pytest
+
 from server_sdk.auth import BearerAuth
 from server_sdk.config import DEFAULT_BASE_URL, DEFAULT_USER_AGENT, ClientConfig
 
@@ -19,7 +21,7 @@ def test_default_config() -> None:
     assert headers["Accept"] == "application/json"
 
 
-def test_config_from_env(monkeypatch) -> None:
+def test_config_from_env(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("SERVER_BASE_URL", "https://api.internal.network")
     custom_cfg = ClientConfig(base_url="https://api.internal.network")
     assert custom_cfg.base_url == "https://api.internal.network"
