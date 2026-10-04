@@ -4,7 +4,7 @@ A typed, resilient Python client library for connecting to backend REST servers 
 
 [![CI](https://img.shields.io/badge/CI-Passing-2ea44f?style=flat-square&logo=githubactions&logoColor=white)](https://github.com/Arthur-911/SDK-Software-development-Kit-/actions)
 [![Coverage](https://img.shields.io/badge/Coverage-100%25-brightgreen?style=flat-square)](https://github.com/Arthur-911/SDK-Software-development-Kit-)
-[![Python](https://img.shields.io/badge/Python-3.10%20%7C%203.11%20%7C%203.12-blue?style=flat-square)](https://pypi.org/project/server-sdk/)
+[![Python](https://img.shields.io/badge/Python-3.9%20%7C%203.10%20%7C%203.11%20%7C%203.12%20%7C%203.13-blue?style=flat-square)](https://pypi.org/project/server-sdk/)
 [![Type Checked](https://img.shields.io/badge/Mypy-Strict-informational?style=flat-square)](https://mypy-lang.org/)
 [![Code Style](https://img.shields.io/badge/Code%20Style-Ruff-black?style=flat-square)](https://github.com/astral-sh/ruff)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg?style=flat-square)](LICENSE)
@@ -144,7 +144,36 @@ async def main():
 asyncio.run(main())
 ```
 
-### 4. Error Handling and Retries
+### 4. Typed Model Parsing
+
+Parse responses directly into custom Pydantic models:
+
+```python
+from pydantic import BaseModel
+from server_sdk import ServerClient
+
+class UserModel(BaseModel):
+    id: int
+    name: str
+    email: str
+
+with ServerClient(base_url="https://api.example.com") as client:
+    user = client.get("/users/1", response_model=UserModel)
+    print(f"Loaded user: {user.name} ({user.email})")
+```
+
+### 5. Built-in Pagination
+
+Iterate through multi-page API results seamlessly:
+
+```python
+with ServerClient(base_url="https://api.example.com") as client:
+    # Automatically requests page=1, page=2, etc. until exhausted
+    for user in client.paginate("/users", page_size=50, max_pages=10):
+        print(user["name"])
+```
+
+### 6. Error Handling and Retries
 
 The client automatically retries transient network drops and rate limits. Unresolved issues raise typed exceptions:
 
