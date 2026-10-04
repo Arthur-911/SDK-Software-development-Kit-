@@ -19,5 +19,9 @@ The format is based on Keep a Changelog, and this project adheres to Semantic Ve
 - Generic HTTP methods (`get`, `post`, `put`, `patch`, `delete`, `request`).
 - Automatic retry engine with exponential backoff on HTTP 429 and 5xx server errors.
 - Strongly typed exception hierarchy (`ServerSDKError`, `APIError`, `AuthenticationError`, `RateLimitError`, `NotFoundError`, `ServerError`, `TimeoutError`, `ValidationError`).
+- Typed response parsing with generic Pydantic models (`response_model`).
+- Built-in multi-page pagination iterators (`paginate`).
+- Safe HTTP 204 No Content and empty payload handling.
+- Randomized full jitter on backoff retries.
 - 100% test coverage suite across all client methods and error conditions.
 - PEP 561 compliance marker (`py.typed`).
