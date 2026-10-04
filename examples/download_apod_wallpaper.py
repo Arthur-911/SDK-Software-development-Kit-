@@ -20,7 +20,7 @@ def main() -> None:
             target_path = output_dir / f"apod_{apod.date}.jpg"
             print(f"Downloading HD wallpaper to: {target_path} ...")
             saved_path = apod.download(target_path, use_hd=True)
-            print(f"✅ Successfully saved ({saved_path.stat().st_size // 1024} KB) to {saved_path}")
+            print(f"Saved ({saved_path.stat().st_size // 1024} KB) to {saved_path}")
         else:
             print(f"Today's media is a {apod.media_type}: {apod.url}")
 

@@ -53,11 +53,11 @@ dev = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/your-username/nasa-sdk"
-Documentation = "https://github.com/your-username/nasa-sdk#readme"
-Repository = "https://github.com/your-username/nasa-sdk.git"
-Issues = "https://github.com/your-username/nasa-sdk/issues"
-Changelog = "https://github.com/your-username/nasa-sdk/blob/main/CHANGELOG.md"
+Homepage = "https://github.com/Arthur-911/SDK-Software-development-Kit-"
+Documentation = "https://github.com/Arthur-911/SDK-Software-development-Kit-#readme"
+Repository = "https://github.com/Arthur-911/SDK-Software-development-Kit-.git"
+Issues = "https://github.com/Arthur-911/SDK-Software-development-Kit-/issues"
+Changelog = "https://github.com/Arthur-911/SDK-Software-development-Kit-/blob/main/CHANGELOG.md"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/nasa_sdk"]
