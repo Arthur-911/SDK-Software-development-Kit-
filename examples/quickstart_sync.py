@@ -29,7 +29,7 @@ def main() -> None:
         for date_str, asteroids in feed.near_earth_objects.items():
             print(f"Date: {date_str} - {len(asteroids)} objects detected.")
             for ast in asteroids[:3]:
-                hazard_str = "⚠️ HAZARDOUS" if ast.is_potentially_hazardous_asteroid else "✅ Safe"
+                hazard_str = "HAZARDOUS" if ast.is_potentially_hazardous_asteroid else "Safe"
                 print(f" - {ast.name} ({hazard_str})")
 
 

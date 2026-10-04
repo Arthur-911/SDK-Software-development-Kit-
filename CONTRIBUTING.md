@@ -1,82 +1,43 @@
-# Contributing to NASA Python SDK
+# Contributing
 
-Thank you for your interest in contributing to the **NASA Python SDK**! We welcome bug fixes, documentation improvements, new endpoint additions, and performance enhancements.
+Contributions are welcome. You can report bugs, request features, or submit pull requests.
 
----
+## Development Setup
 
-## 🛠️ Development Setup
+1. Requirements: Python 3.10 or newer and Git.
+2. Clone the repository:
+   ```bash
+   git clone https://github.com/Arthur-911/SDK-Software-development-Kit-.git
+   cd SDK-Software-development-Kit-
+   ```
+3. Set up a virtual environment:
+   ```bash
+   python -m venv .venv
+   source .venv/bin/activate  # On Windows: .\.venv\Scripts\activate
+   ```
+4. Install editable package and development dependencies:
+   ```bash
+   pip install -e ".[dev]"
+   ```
 
-### 1. Prerequisites
-- Python 3.10+
-- Git
+## Checks and Testing
 
-### 2. Fork and Clone
+Before opening a pull request, make sure tests and formatting pass:
+
 ```bash
-git clone https://github.com/your-username/nasa-sdk.git
-cd nasa-sdk
-```
-
-### 3. Create a Virtual Environment
-```bash
-python -m venv .venv
-
-# On Linux/macOS:
-source .venv/bin/activate
-
-# On Windows:
-.\.venv\Scripts\activate
-```
-
-### 4. Install Dependencies
-Install the package in editable mode along with development dependencies:
-```bash
-pip install -e ".[dev]"
-```
-
----
-
-## 🧪 Testing and Quality Standards
-
-We maintain **100% test coverage** and strict typing standards. Before submitting a Pull Request, run the following verification steps:
-
-### Run Unit Tests & Coverage
-```bash
+# Run tests with coverage
 pytest
-```
 
-### Run Linter & Formatter (Ruff)
-```bash
+# Check linting and formatting
 ruff check src tests
 ruff format --check src tests
-```
 
-To auto-format code:
-```bash
-ruff format src tests
-```
-
-### Run Type Checker (Mypy)
-```bash
+# Run type checker
 mypy src
 ```
 
----
+## Pull Requests
 
-## 📝 Commit Guidelines
-
-We recommend using [Conventional Commits](https://www.conventionalcommits.org/):
-- `feat:` A new feature or endpoint
-- `fix:` A bug fix
-- `docs:` Documentation changes
-- `test:` Adding or refactoring tests
-- `refactor:` Code change that neither fixes a bug nor adds a feature
-- `chore:` Maintenance tasks or dependency updates
-
----
-
-## 🚀 Submitting a Pull Request
-
-1. Create a feature branch: `git checkout -b feat/your-feature-name`
-2. Commit your changes: `git commit -m "feat(apod): add thumbnail support"`
-3. Push to your fork: `git push origin feat/your-feature-name`
-4. Open a Pull Request on GitHub against the `main` branch.
+1. Create a branch: `git checkout -b feature-or-fix-name`
+2. Commit your work with clear commit messages.
+3. Push to your branch and open a pull request on GitHub.
