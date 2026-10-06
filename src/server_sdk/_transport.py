@@ -3,9 +3,12 @@
 from __future__ import annotations
 
 import asyncio
+import email.utils
 import logging
 import random
 import time
+import urllib.parse
+from datetime import datetime, timezone
 from typing import Any
 
 import httpx
@@ -22,6 +25,9 @@ from server_sdk.exceptions import (
 
 logger = logging.getLogger("server_sdk")
 
+MAX_RETRY_AFTER_SECONDS = 300.0
+MAX_ERROR_MESSAGE_LEN = 500
+SENSITIVE_PARAM_NAMES = ("api_key", "token", "secret", "password", "key", "auth", "authorization")
 RETRYABLE_STATUS_CODES = (429, 500, 502, 503, 504)
 RETRYABLE_EXCEPTIONS = (
     httpx.ConnectError,
@@ -31,14 +37,46 @@ RETRYABLE_EXCEPTIONS = (
 )
 
 
+def _is_same_origin(url_a: str, url_b: str) -> bool:
+    """Check if two URLs share the same scheme, host, and port."""
+    parsed_a = urllib.parse.urlparse(url_a)
+    parsed_b = urllib.parse.urlparse(url_b)
+    return (parsed_a.scheme, parsed_a.netloc) == (parsed_b.scheme, parsed_b.netloc)
+
+
+def _sanitize_params(
+    params: dict[str, Any], extra_sensitive: set[str] | None = None
+) -> dict[str, Any]:
+    """Sanitize sensitive keys in query parameters for safe logging."""
+    sanitized: dict[str, Any] = {}
+    extra = extra_sensitive or set()
+    for k, v in params.items():
+        if k in extra or any(sensitive in k.lower() for sensitive in SENSITIVE_PARAM_NAMES):
+            sanitized[k] = "[REDACTED]"
+        else:
+            sanitized[k] = v
+    return sanitized
+
+
 def _extract_retry_after(headers: httpx.Headers) -> float | None:
     """Extract Retry-After header value in seconds if present."""
     retry_after = headers.get("Retry-After")
-    if retry_after:
-        try:
-            return float(retry_after)
-        except ValueError:
-            return None
+    if not retry_after:
+        return None
+    try:
+        seconds = float(retry_after)
+        return max(0.0, min(seconds, MAX_RETRY_AFTER_SECONDS))
+    except ValueError:
+        pass
+
+    try:
+        parsed_date = email.utils.parsedate_to_datetime(retry_after)
+        now = datetime.now(timezone.utc)
+        seconds = (parsed_date - now).total_seconds()
+        return max(0.0, min(seconds, MAX_RETRY_AFTER_SECONDS))
+    except Exception:
+        pass
+
     return None
 
 
@@ -50,7 +88,7 @@ def _calculate_sleep(
 ) -> float:
     """Calculate exponential backoff sleep with optional randomized jitter."""
     if retry_after is not None:
-        return retry_after
+        return max(0.0, min(float(retry_after), MAX_RETRY_AFTER_SECONDS))
     delay = backoff_factor * (2**attempt)
     if jitter:
         return float(random.uniform(0.5 * delay, 1.0 * delay))
@@ -72,6 +110,11 @@ def _parse_response_data(response: httpx.Response) -> Any:
         return response.text
 
 
+def _truncate_msg(msg: str) -> str:
+    """Truncate long raw error messages to prevent log flooding (CWE-400)."""
+    return (msg[:MAX_ERROR_MESSAGE_LEN] + "...") if len(msg) > MAX_ERROR_MESSAGE_LEN else msg
+
+
 def _handle_response_error(response: httpx.Response) -> None:
     """Parse error response and raise corresponding typed APIError."""
     status_code = response.status_code
@@ -82,20 +125,23 @@ def _handle_response_error(response: httpx.Response) -> None:
         body: Any = response.json()
         if isinstance(body, dict):
             if "error" in body and isinstance(body["error"], dict):
-                message = body["error"].get("message") or body["error"].get("code") or str(body)
+                raw_m = body["error"].get("message") or body["error"].get("code") or str(body)
+                message = _truncate_msg(str(raw_m))
             elif "error_message" in body:
-                message = body["error_message"]
+                message = _truncate_msg(str(body["error_message"]))
             elif "detail" in body:
-                message = body["detail"]
+                message = _truncate_msg(str(body["detail"]))
             elif "message" in body:
-                message = body["message"]
+                message = _truncate_msg(str(body["message"]))
             else:
-                message = response.text or f"HTTP {status_code} server error"
+                raw_text = response.text or f"HTTP {status_code} server error"
+                message = _truncate_msg(raw_text)
         else:
-            message = str(body)
+            message = _truncate_msg(str(body))
     except Exception:
         body = response.text
-        message = response.text or f"HTTP {status_code} server error"
+        raw_text = response.text or f"HTTP {status_code} server error"
+        message = _truncate_msg(raw_text)
 
     if status_code in (401, 403):
         raise AuthenticationError(
@@ -165,20 +211,34 @@ class SyncTransport:
         req_headers = dict(headers or {})
         req_params = dict(params or {})
 
-        req_headers, req_params = self.config.auth.apply(req_headers, req_params)
-
         req_timeout = timeout or self.config.timeout
+        is_absolute = path.startswith(("http://", "https://"))
         full_url = (
             path
-            if path.startswith(("http://", "https://"))
+            if is_absolute
             else f"{self.config.base_url.rstrip('/')}/{path.lstrip('/')}"
         )
+
+        if not is_absolute or _is_same_origin(full_url, self.config.base_url):
+            req_headers, req_params = self.config.auth.apply(req_headers, req_params)
+        else:
+            logger.warning(
+                "Request targeted an external URL '%s' differing from configured base_url '%s'. "
+                "Omitting credentials to prevent exfiltration.",
+                full_url,
+                self.config.base_url,
+            )
 
         is_retryable_method = method.upper() in self.config.retry_methods
         attempt = 0
         while True:
             try:
-                logger.debug("Request: %s %s params=%s", method, full_url, req_params)
+                logger.debug(
+                    "Request: %s %s params=%s",
+                    method,
+                    full_url,
+                    _sanitize_params(req_params, self.config.auth.sensitive_params),
+                )
                 response = self._client.request(
                     method=method,
                     url=full_url,
@@ -276,20 +336,34 @@ class AsyncTransport:
         req_headers = dict(headers or {})
         req_params = dict(params or {})
 
-        req_headers, req_params = self.config.auth.apply(req_headers, req_params)
-
         req_timeout = timeout or self.config.timeout
+        is_absolute = path.startswith(("http://", "https://"))
         full_url = (
             path
-            if path.startswith(("http://", "https://"))
+            if is_absolute
             else f"{self.config.base_url.rstrip('/')}/{path.lstrip('/')}"
         )
+
+        if not is_absolute or _is_same_origin(full_url, self.config.base_url):
+            req_headers, req_params = self.config.auth.apply(req_headers, req_params)
+        else:
+            logger.warning(
+                "Request targeted an external URL '%s' differing from configured base_url '%s'. "
+                "Omitting credentials to prevent exfiltration.",
+                full_url,
+                self.config.base_url,
+            )
 
         is_retryable_method = method.upper() in self.config.retry_methods
         attempt = 0
         while True:
             try:
-                logger.debug("Async Request: %s %s params=%s", method, full_url, req_params)
+                logger.debug(
+                    "Async Request: %s %s params=%s",
+                    method,
+                    full_url,
+                    _sanitize_params(req_params, self.config.auth.sensitive_params),
+                )
                 response = await self._client.request(
                     method=method,
                     url=full_url,

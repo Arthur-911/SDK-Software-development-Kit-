@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import pytest
+
 from server_sdk.auth import ApiKeyAuth, BasicAuth, BearerAuth, NoAuth
 
 
@@ -24,7 +26,8 @@ def test_api_key_auth_header() -> None:
 
 
 def test_api_key_auth_query_param() -> None:
-    auth = ApiKeyAuth(api_key="key_abc", query_param="token")
+    with pytest.warns(UserWarning, match="Passing API keys in query parameters is insecure"):
+        auth = ApiKeyAuth(api_key="key_abc", query_param="token")
     headers, params = auth.apply({}, {})
     assert "X-API-Key" not in headers
     assert params["token"] == "key_abc"
@@ -41,3 +44,15 @@ def test_basic_auth() -> None:
     headers, _ = auth.apply({}, {})
     assert "Authorization" in headers
     assert headers["Authorization"].startswith("Basic ")
+
+    with pytest.raises(ValueError, match="Username cannot contain a colon"):
+        BasicAuth(username="user:name", password="secret")
+
+
+def test_auth_sensitive_params() -> None:
+    assert NoAuth().sensitive_params == set()
+    assert BearerAuth("token").sensitive_params == set()
+    assert ApiKeyAuth("key").sensitive_params == set()
+    with pytest.warns(UserWarning):
+        custom = ApiKeyAuth("key", query_param="auth_code")
+    assert custom.sensitive_params == {"auth_code"}

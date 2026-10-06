@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import os
+import urllib.parse
+import warnings
 from dataclasses import dataclass, field
 
 from server_sdk._version import __version__
@@ -67,6 +69,26 @@ class ClientConfig:
     headers: dict[str, str] = field(default_factory=dict)
     retry_methods: tuple[str, ...] = DEFAULT_RETRY_METHODS
     jitter: bool = True
+
+    def __post_init__(self) -> None:
+        """Validate configuration settings and issue security warnings if needed."""
+        if self.timeout <= 0:
+            raise ValueError(f"Client timeout must be positive, got {self.timeout}")
+        if self.max_retries < 0:
+            raise ValueError(f"max_retries must be non-negative, got {self.max_retries}")
+
+        parsed = urllib.parse.urlparse(self.base_url)
+        if (
+            parsed.scheme == "http"
+            and parsed.hostname not in ("localhost", "127.0.0.1", "::1", "testserver", None)
+            and not isinstance(self.auth, NoAuth)
+        ):
+            warnings.warn(
+                f"Insecure HTTP base_url '{self.base_url}' with authentication enabled transmits "
+                "credentials in cleartext (CWE-319). Use HTTPS in non-local environments.",
+                UserWarning,
+                stacklevel=2,
+            )
 
     def get_headers(self) -> dict[str, str]:
         """Construct headers combining default User-Agent with custom headers."""

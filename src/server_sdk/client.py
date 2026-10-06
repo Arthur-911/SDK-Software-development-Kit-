@@ -326,12 +326,14 @@ class ServerClient:
             query_params[page_param] = page
             data = self.get(path, params=query_params, headers=headers)
 
-            items: list[Any]
+            items: list[Any] = []
             if isinstance(data, list):
                 items = data
             elif isinstance(data, dict):
-                extracted = data.get("items") or data.get("data") or data.get("results")
-                items = extracted if isinstance(extracted, list) else []
+                for key in ("items", "data", "results"):
+                    if key in data and isinstance(data[key], list):
+                        items = data[key]
+                        break
             else:
                 break
 

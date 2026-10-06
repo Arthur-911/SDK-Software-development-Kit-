@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "server-sdk"
-version = "0.1.0"
+version = "0.1.1"
 description = "A typed, resilient Python Server Developer Kit for backend services and REST APIs."
 readme = "README.md"
 requires-python = ">=3.9"
@@ -91,7 +91,7 @@ warn_redundant_casts = true
 warn_unused_ignores = true
 
 [[tool.mypy.overrides]]
-module = "tests.*"
+module = ["tests", "tests.*"]
 disallow_untyped_defs = false
 check_untyped_defs = true
 
@@ -99,6 +99,7 @@ check_untyped_defs = true
 minversion = "7.0"
 addopts = "-ra -q --cov=server_sdk --cov-report=term-missing --cov-report=xml --cov-fail-under=100"
 testpaths = ["tests"]
+pythonpath = ["src"]
 asyncio_mode = "auto"
 filterwarnings = [
     "ignore::DeprecationWarning",

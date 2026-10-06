@@ -63,10 +63,10 @@ from server_sdk import ApiKeyAuth, BasicAuth, BearerAuth, NoAuth, ServerClient
 # 1. Bearer Token (JWT / OAuth2)
 client = ServerClient(base_url="https://api.example.com", auth=BearerAuth("jwt-token-here"))
 
-# 2. API Key via Header (Default header: X-API-Key)
+# 2. API Key via Header (Recommended; Default header: X-API-Key)
 client = ServerClient(base_url="https://api.example.com", auth=ApiKeyAuth("my-api-key"))
 
-# 3. API Key via Query Parameter
+# 3. API Key via Query Parameter (Discouraged per CWE-598; use headers when possible)
 client = ServerClient(
     base_url="https://api.example.com",
     auth=ApiKeyAuth("my-api-key", query_param="token"),

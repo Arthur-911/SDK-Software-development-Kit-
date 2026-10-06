@@ -11,7 +11,9 @@ from server_sdk._transport import (
     _calculate_sleep,
     _extract_retry_after,
     _handle_response_error,
+    _is_same_origin,
     _parse_response_data,
+    _sanitize_params,
 )
 from server_sdk.auth import BearerAuth
 from server_sdk.config import ClientConfig
@@ -34,6 +36,46 @@ def test_extract_retry_after() -> None:
 
     headers_empty = httpx.Headers({})
     assert _extract_retry_after(headers_empty) is None
+
+    # Clamping large values
+    headers_large = httpx.Headers({"Retry-After": "999999"})
+    assert _extract_retry_after(headers_large) == 300.0
+
+    # Negative values clamped to 0
+    headers_neg = httpx.Headers({"Retry-After": "-10"})
+    assert _extract_retry_after(headers_neg) == 0.0
+
+    # HTTP-date format
+    headers_date = httpx.Headers({"Retry-After": "Wed, 21 Oct 2040 07:28:00 GMT"})
+    extracted_date = _extract_retry_after(headers_date)
+    assert extracted_date is not None and extracted_date > 0.0
+
+    # Non-date string exception handled
+    headers_bad_date = httpx.Headers({"Retry-After": "NotADate 9999"})
+    assert _extract_retry_after(headers_bad_date) is None
+
+
+def test_sanitize_params() -> None:
+    raw = {
+        "api_key": "secret",
+        "user": "alice",
+        "auth_token": "xyz",
+        "limit": 10,
+        "custom_id": "abc",
+    }
+    sanitized = _sanitize_params(raw, extra_sensitive={"custom_id"})
+    assert sanitized["api_key"] == "[REDACTED]"
+    assert sanitized["auth_token"] == "[REDACTED]"
+    assert sanitized["custom_id"] == "[REDACTED]"
+    assert sanitized["user"] == "alice"
+    assert sanitized["limit"] == 10
+
+
+def test_is_same_origin() -> None:
+    assert _is_same_origin("https://api.example.com/v1", "https://api.example.com/v2") is True
+    assert _is_same_origin("https://api.example.com:8080/v1", "https://api.example.com/v1") is False
+    assert _is_same_origin("http://api.example.com/v1", "https://api.example.com/v1") is False
+    assert _is_same_origin("https://api.example.com", "https://evil.com") is False
 
 
 def test_handle_response_error_status_less_than_400() -> None:
@@ -110,22 +152,35 @@ def test_handle_response_error_variants() -> None:
     with pytest.raises(APIError):
         _handle_response_error(res_empty)
 
+    # Long body is truncated
+    res_long = httpx.Response(500, text="LONG_ERROR " * 100)
+    with pytest.raises(ServerError) as exc_long:
+        _handle_response_error(res_long)
+    assert str(exc_long.value).endswith("...")
+
 
 def test_sync_transport_success() -> None:
     def handler(request: httpx.Request) -> httpx.Response:
-        assert request.headers.get("Authorization") == "Bearer secret-token"
+        if "other.com" in str(request.url):
+            assert "Authorization" not in request.headers
+        else:
+            assert request.headers.get("Authorization") == "Bearer secret-token"
         return httpx.Response(200, json={"result": "ok"})
 
     client = httpx.Client(transport=httpx.MockTransport(handler))
-    config = ClientConfig(auth=BearerAuth("secret-token"))
+    config = ClientConfig(base_url="https://api.example.com", auth=BearerAuth("secret-token"))
     transport = SyncTransport(config=config, client=client)
 
     result = transport.request("GET", "/test")
     assert result == {"result": "ok"}
 
-    # Absolute URL
+    # Absolute URL on same origin
     result_abs = transport.request("GET", "https://api.example.com/test")
     assert result_abs == {"result": "ok"}
+
+    # External origin strips credentials
+    result_ext = transport.request("GET", "https://other.com/external")
+    assert result_ext == {"result": "ok"}
     transport.close()
 
 
@@ -220,18 +275,26 @@ def test_sync_transport_timeout_exception() -> None:
 @pytest.mark.asyncio
 async def test_async_transport_success() -> None:
     def handler(request: httpx.Request) -> httpx.Response:
-        assert request.headers.get("Authorization") == "Bearer async-token"
+        if "other.com" in str(request.url):
+            assert "Authorization" not in request.headers
+        else:
+            assert request.headers.get("Authorization") == "Bearer async-token"
         return httpx.Response(200, json={"async": "ok"})
 
     client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
-    config = ClientConfig(auth=BearerAuth("async-token"))
+    config = ClientConfig(base_url="https://api.example.com", auth=BearerAuth("async-token"))
     transport = AsyncTransport(config=config, client=client)
 
     result = await transport.request("GET", "/async-test")
     assert result == {"async": "ok"}
 
+    # Same origin absolute URL
     result_abs = await transport.request("GET", "https://api.example.com/async-test")
     assert result_abs == {"async": "ok"}
+
+    # External origin strips credentials
+    result_ext = await transport.request("GET", "https://other.com/async-external")
+    assert result_ext == {"async": "ok"}
     await transport.aclose()
 
 

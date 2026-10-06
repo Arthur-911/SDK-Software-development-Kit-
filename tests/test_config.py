@@ -95,3 +95,19 @@ def test_config_overrides() -> None:
     assert partial.base_url == "https://production.api.com"
     assert partial.retry_methods == ("GET", "POST")
     assert partial.jitter is False
+
+
+def test_config_insecure_http_warning() -> None:
+    with pytest.warns(UserWarning, match="Insecure HTTP base_url"):
+        ClientConfig(base_url="http://insecure.example.com", auth=BearerAuth("token123"))
+
+
+def test_config_bounds_validation() -> None:
+    with pytest.raises(ValueError, match="timeout must be positive"):
+        ClientConfig(timeout=-1.0)
+
+    with pytest.raises(ValueError, match="timeout must be positive"):
+        ClientConfig(timeout=0.0)
+
+    with pytest.raises(ValueError, match="max_retries must be non-negative"):
+        ClientConfig(max_retries=-1)

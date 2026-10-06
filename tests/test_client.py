@@ -94,6 +94,18 @@ def test_sync_client_paginate() -> None:
                 return httpx.Response(200, json={"items": ["alpha", "beta"]})
             return httpx.Response(200, json={"items": []})
 
+        if request.url.path == "/results-items":
+            if page == 1:
+                return httpx.Response(200, json={"results": ["r1", "r2"]})
+            return httpx.Response(200, json={"results": []})
+
+        if request.url.path == "/empty-items-precedence":
+            # "items" is empty list, should NOT fall back to "data"
+            return httpx.Response(200, json={"items": [], "data": ["should_not_yield"]})
+
+        if request.url.path == "/no-items-dict":
+            return httpx.Response(200, json={"status": "empty", "count": 0})
+
         if request.url.path == "/bad-page":
             return httpx.Response(204)
 
@@ -112,6 +124,18 @@ def test_sync_client_paginate() -> None:
         # Paginate dict items
         dict_items = list(server.paginate("/dict-items", page_size=2))
         assert dict_items == ["alpha", "beta"]
+
+        # Paginate results dict key
+        results_items = list(server.paginate("/results-items", page_size=2))
+        assert results_items == ["r1", "r2"]
+
+        # Empty items list takes precedence and doesn't fall back
+        empty_prec = list(server.paginate("/empty-items-precedence"))
+        assert empty_prec == []
+
+        # Dict with no recognised item keys returns empty
+        no_key_items = list(server.paginate("/no-items-dict"))
+        assert no_key_items == []
 
         # Bad page terminates pagination immediately
         bad_items = list(server.paginate("/bad-page"))
@@ -194,6 +218,14 @@ async def test_async_client_paginate() -> None:
                 return httpx.Response(200, json={"data": ["x", "y"]})
             return httpx.Response(200, json={"data": []})
 
+        if request.url.path == "/async-results":
+            if page == 1:
+                return httpx.Response(200, json={"results": ["ar1", "ar2"]})
+            return httpx.Response(200, json={"results": []})
+
+        if request.url.path == "/async-no-items-dict":
+            return httpx.Response(200, json={"status": "none"})
+
         if request.url.path == "/async-bad":
             return httpx.Response(204)
 
@@ -215,6 +247,16 @@ async def test_async_client_paginate() -> None:
         async for item in server.paginate("/async-dict", page_size=2):
             dict_items.append(item)
         assert dict_items == ["x", "y"]
+
+        results_items = []
+        async for item in server.paginate("/async-results", page_size=2):
+            results_items.append(item)
+        assert results_items == ["ar1", "ar2"]
+
+        no_key_items = []
+        async for item in server.paginate("/async-no-items-dict"):
+            no_key_items.append(item)
+        assert no_key_items == []
 
         bad_items = []
         async for item in server.paginate("/async-bad"):
