@@ -340,8 +340,6 @@ class AsyncServerClient:
                     if key in data and isinstance(data[key], list):
                         items = data[key]
                         break
-            else:
-                break
 
             if not items:
                 break
