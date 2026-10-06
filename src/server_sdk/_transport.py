@@ -213,11 +213,7 @@ class SyncTransport:
 
         req_timeout = timeout or self.config.timeout
         is_absolute = path.startswith(("http://", "https://"))
-        full_url = (
-            path
-            if is_absolute
-            else f"{self.config.base_url.rstrip('/')}/{path.lstrip('/')}"
-        )
+        full_url = path if is_absolute else f"{self.config.base_url.rstrip('/')}/{path.lstrip('/')}"
 
         if not is_absolute or _is_same_origin(full_url, self.config.base_url):
             req_headers, req_params = self.config.auth.apply(req_headers, req_params)
@@ -338,11 +334,7 @@ class AsyncTransport:
 
         req_timeout = timeout or self.config.timeout
         is_absolute = path.startswith(("http://", "https://"))
-        full_url = (
-            path
-            if is_absolute
-            else f"{self.config.base_url.rstrip('/')}/{path.lstrip('/')}"
-        )
+        full_url = path if is_absolute else f"{self.config.base_url.rstrip('/')}/{path.lstrip('/')}"
 
         if not is_absolute or _is_same_origin(full_url, self.config.base_url):
             req_headers, req_params = self.config.auth.apply(req_headers, req_params)
