@@ -217,6 +217,34 @@ client = ServerClient(
 
 ---
 
+## Enterprise Security & Resilience
+
+The SDK is hardened with built-in defenses against modern application vulnerabilities:
+
+- **SSRF Guard (CWE-918):** Blocks outbound requests to private IPs (`10.0.0.0/8`, `172.16.0.0/12`, `192.168.0.0/16`), link-local IPs (`169.254.0.0/16`), and cloud metadata services (`169.254.169.254`, `metadata.google.internal`) by default.
+- **Circuit Breaker:** Fails fast after consecutive upstream 5xx outages to protect both client and backend from cascading failures (`circuit_breaker_enabled=True`).
+- **Response Memory Cap (CWE-400):** Rejects payload sizes exceeding `max_response_bytes` (10 MB default) to prevent decompression bombs and out-of-memory (OOM) crashes.
+- **Strict TLS 1.2+ & Custom CA (CWE-326):** Mandates minimum TLS 1.2 and supports corporate CA bundles via `ssl_ca_bundle`.
+- **CRLF Header Injection Protection:** Validates headers against carriage return/newline control characters.
+- **Granular Timeouts:** Configure separate thresholds for `connect_timeout`, `read_timeout`, `write_timeout`, and `pool_timeout`.
+
+```python
+from server_sdk import ServerClient
+
+client = ServerClient(
+    base_url="https://api.example.com",
+    circuit_breaker_enabled=True,
+    circuit_breaker_failure_threshold=5,
+    max_response_bytes=5 * 1024 * 1024, # 5 MB cap
+    connect_timeout=3.0,
+    read_timeout=10.0,
+    allow_private_ips=False,
+    ssl_min_version="TLSv1_2",
+)
+```
+
+---
+
 ## Testing
 
 The codebase includes full unit tests with 100% branch and line coverage:

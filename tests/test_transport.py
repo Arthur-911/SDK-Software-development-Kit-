@@ -2,27 +2,41 @@
 
 from __future__ import annotations
 
+import socket
+import ssl
+import time
+
 import httpx
 import pytest
 
 from server_sdk._transport import (
     AsyncTransport,
+    CircuitBreaker,
+    CircuitState,
     SyncTransport,
     _calculate_sleep,
+    _check_payload_size,
+    _create_ssl_context,
     _extract_retry_after,
     _handle_response_error,
     _is_same_origin,
     _parse_response_data,
     _sanitize_params,
+    _validate_header_injection,
+    _validate_target_url,
 )
 from server_sdk.auth import BearerAuth
 from server_sdk.config import ClientConfig
 from server_sdk.exceptions import (
     APIError,
     AuthenticationError,
+    CircuitBreakerOpenError,
     NotFoundError,
+    PayloadTooLargeError,
     RateLimitError,
+    SecurityError,
     ServerError,
+    SSRFError,
     TimeoutError,
 )
 
@@ -476,3 +490,241 @@ async def test_async_transport_204_and_empty() -> None:
     transport = AsyncTransport(config=ClientConfig(), client=client)
     res = await transport.request("DELETE", "/item/1")
     assert res is None
+
+
+def test_circuit_breaker_unit() -> None:
+    cb = CircuitBreaker(failure_threshold=2, recovery_time=0.05, enabled=True)
+    assert cb.state is CircuitState.CLOSED
+    cb.check_state()
+
+    cb.record_failure()
+    assert cb.state is CircuitState.CLOSED
+
+    cb.record_failure()
+    current_state: CircuitState = cb.state
+    assert current_state is CircuitState.OPEN
+
+    with pytest.raises(CircuitBreakerOpenError):
+        cb.check_state()
+
+    time.sleep(0.06)
+    half_open_state: CircuitState = cb.state
+    assert half_open_state is CircuitState.HALF_OPEN
+
+    cb.record_success()
+    final_state: CircuitState = cb.state
+    assert final_state is CircuitState.CLOSED
+    assert cb._consecutive_failures == 0
+
+    # Disabled circuit breaker does nothing
+    cb_disabled = CircuitBreaker(enabled=False)
+    cb_disabled.record_failure()
+    cb_disabled.record_success()
+    cb_disabled.check_state()
+
+
+def test_ssl_context_creation() -> None:
+    assert _create_ssl_context(verify=False) is False
+    ctx_12 = _create_ssl_context(verify=True, min_tls_version="TLSv1_2")
+    assert isinstance(ctx_12, ssl.SSLContext)
+    ctx_13 = _create_ssl_context(verify=True, min_tls_version="TLSv1_3")
+    assert isinstance(ctx_13, ssl.SSLContext)
+
+
+def test_validate_target_url_ssrf_mitigation() -> None:
+    with pytest.raises(SSRFError, match="Disallowed URL scheme"):
+        _validate_target_url("ftp://example.com", False, True)
+
+    with pytest.raises(SSRFError, match="does not contain a valid hostname"):
+        _validate_target_url("http://", False, True)
+
+    with pytest.raises(SSRFError, match="Requests to localhost 'localhost' are blocked"):
+        _validate_target_url("http://localhost:8080", False, False)
+
+    with pytest.raises(SSRFError, match="cloud metadata endpoint"):
+        _validate_target_url("http://metadata.google.internal/v1", False, True)
+
+    with pytest.raises(SSRFError, match=r"Requests to loopback IP '127\.0\.0\.1' are blocked"):
+        _validate_target_url("http://127.0.0.1:8080", False, False)
+
+    # Allowed loopback
+    _validate_target_url("http://127.0.0.1:8080", False, True)
+
+    with pytest.raises(SSRFError, match="Requests to private or reserved IP"):
+        _validate_target_url("http://10.0.0.1", False, True)
+
+    with pytest.raises(SSRFError, match="Requests to private or reserved IP"):
+        _validate_target_url("http://169.254.169.254", False, True)
+
+    # Allowed when allow_private_ips=True
+    _validate_target_url("http://10.0.0.1", True, True)
+    _validate_target_url("http://api.example.com", True, True)
+
+
+def test_validate_target_url_dns_resolution(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(socket, "gethostbyname", lambda host: "127.0.0.1")
+    with pytest.raises(SSRFError, match="resolved to loopback IP"):
+        _validate_target_url("http://loopback.test", False, False)
+
+    monkeypatch.setattr(socket, "gethostbyname", lambda host: "192.168.1.1")
+    with pytest.raises(SSRFError, match="resolved to private/reserved IP"):
+        _validate_target_url("http://internal.company", False, True)
+
+    def raise_gai(host: str) -> str:
+        raise socket.gaierror("lookup failed")
+
+    monkeypatch.setattr(socket, "gethostbyname", raise_gai)
+    _validate_target_url("http://unknown.test", False, True)
+
+
+def test_validate_header_injection() -> None:
+    _validate_header_injection({"X-Good": "safe"})
+
+    with pytest.raises(SecurityError, match="CRLF control character detected"):
+        _validate_header_injection({"X-Bad\r": "val"})
+
+    with pytest.raises(SecurityError, match="CRLF control character detected"):
+        _validate_header_injection({"X-Bad": "val\n"})
+
+
+def test_check_payload_size() -> None:
+    res_cl = httpx.Response(200, headers={"Content-Length": "5000"}, content=b"x")
+    with pytest.raises(PayloadTooLargeError, match="Response Content-Length"):
+        _check_payload_size(res_cl, 1000)
+
+    res_bad_cl = httpx.Response(200, headers={"Content-Length": "not-a-number"}, content=b"small")
+    _check_payload_size(res_bad_cl, 1000)
+
+    res_body = httpx.Response(200, content=b"x" * 2000)
+    del res_body.headers["content-length"]
+    with pytest.raises(PayloadTooLargeError, match="Response body"):
+        _check_payload_size(res_body, 1000)
+
+
+def test_transport_security_guards_sync() -> None:
+    config = ClientConfig(base_url="https://api.example.com")
+    transport = SyncTransport(
+        config=config,
+        client=httpx.Client(transport=httpx.MockTransport(lambda r: httpx.Response(200))),
+    )
+
+    with pytest.raises(SSRFError, match="Protocol-relative URLs"):
+        transport.request("GET", "//evil.com")
+
+    with pytest.raises(SecurityError, match="CRLF control character"):
+        transport.request("GET", "/test", headers={"Evil\r\n": "val"})
+
+    transport.close()
+
+
+@pytest.mark.asyncio
+async def test_transport_security_guards_async() -> None:
+    config = ClientConfig(base_url="https://api.example.com")
+    transport = AsyncTransport(
+        config=config,
+        client=httpx.AsyncClient(transport=httpx.MockTransport(lambda r: httpx.Response(200))),
+    )
+
+    with pytest.raises(SSRFError, match="Protocol-relative URLs"):
+        await transport.request("GET", "//evil.com")
+
+    with pytest.raises(SecurityError, match="CRLF control character"):
+        await transport.request("GET", "/test", headers={"Evil\r\n": "val"})
+
+    await transport.aclose()
+
+
+def test_transport_circuit_breaker_sync() -> None:
+    calls = 0
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal calls
+        calls += 1
+        return httpx.Response(500, json={"error": "failed"})
+
+    client = httpx.Client(transport=httpx.MockTransport(handler))
+    config = ClientConfig(
+        base_url="https://api.example.com",
+        circuit_breaker_enabled=True,
+        circuit_breaker_failure_threshold=2,
+        max_retries=0,
+    )
+    transport = SyncTransport(config=config, client=client)
+
+    with pytest.raises(ServerError):
+        transport.request("GET", "/fail-1")
+    with pytest.raises(ServerError):
+        transport.request("GET", "/fail-2")
+
+    # 3rd request should fail immediately via circuit breaker without hitting handler
+    with pytest.raises(CircuitBreakerOpenError):
+        transport.request("GET", "/fail-3")
+
+    assert calls == 2
+    transport.close()
+
+
+@pytest.mark.asyncio
+async def test_transport_circuit_breaker_async() -> None:
+    calls = 0
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal calls
+        calls += 1
+        return httpx.Response(500, json={"error": "async failed"})
+
+    client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+    config = ClientConfig(
+        base_url="https://api.example.com",
+        circuit_breaker_enabled=True,
+        circuit_breaker_failure_threshold=2,
+        max_retries=0,
+    )
+    transport = AsyncTransport(config=config, client=client)
+
+    with pytest.raises(ServerError):
+        await transport.request("GET", "/fail-1")
+    with pytest.raises(ServerError):
+        await transport.request("GET", "/fail-2")
+
+    with pytest.raises(CircuitBreakerOpenError):
+        await transport.request("GET", "/fail-3")
+
+    assert calls == 2
+    await transport.aclose()
+
+
+def test_transport_payload_size_limit_sync() -> None:
+    client = httpx.Client(
+        transport=httpx.MockTransport(lambda r: httpx.Response(200, content=b"a" * 5000))
+    )
+    config = ClientConfig(base_url="https://api.example.com", max_response_bytes=1000)
+    transport = SyncTransport(config=config, client=client)
+
+    with pytest.raises(PayloadTooLargeError):
+        transport.request("GET", "/large")
+    transport.close()
+
+
+@pytest.mark.asyncio
+async def test_transport_payload_size_limit_async() -> None:
+    client = httpx.AsyncClient(
+        transport=httpx.MockTransport(lambda r: httpx.Response(200, content=b"a" * 5000))
+    )
+    config = ClientConfig(base_url="https://api.example.com", max_response_bytes=1000)
+    transport = AsyncTransport(config=config, client=client)
+
+    with pytest.raises(PayloadTooLargeError):
+        await transport.request("GET", "/large")
+    await transport.aclose()
+
+
+@pytest.mark.asyncio
+async def test_transport_default_client_construction() -> None:
+    t_sync = SyncTransport(ClientConfig(base_url="http://localhost:8000"))
+    assert t_sync._owns_client is True
+    t_sync.close()
+
+    t_async = AsyncTransport(ClientConfig(base_url="http://localhost:8000"))
+    assert t_async._owns_client is True
+    await t_async.aclose()

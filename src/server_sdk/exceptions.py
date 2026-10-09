@@ -75,3 +75,19 @@ class TimeoutError(ServerSDKError):
 
 class ValidationError(ServerSDKError):
     """Raised when client-side parameter validation fails before sending a request."""
+
+
+class SecurityError(ServerSDKError):
+    """Base exception for security violations detected by the SDK."""
+
+
+class SSRFError(SecurityError):
+    """Raised when a request targets a blocked or private IP/host (SSRF prevention)."""
+
+
+class PayloadTooLargeError(SecurityError):
+    """Raised when response body size exceeds maximum allowed bytes (OOM/bomb mitigation)."""
+
+
+class CircuitBreakerOpenError(ServerSDKError):
+    """Raised when requests fail fast because the circuit breaker is in OPEN state."""

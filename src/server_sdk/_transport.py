@@ -4,8 +4,13 @@ from __future__ import annotations
 
 import asyncio
 import email.utils
+import enum
+import ipaddress
 import logging
 import random
+import socket
+import ssl
+import threading
 import time
 import urllib.parse
 from datetime import datetime, timezone
@@ -17,9 +22,13 @@ from server_sdk.config import ClientConfig
 from server_sdk.exceptions import (
     APIError,
     AuthenticationError,
+    CircuitBreakerOpenError,
     NotFoundError,
+    PayloadTooLargeError,
     RateLimitError,
+    SecurityError,
     ServerError,
+    SSRFError,
     TimeoutError,
 )
 
@@ -35,6 +44,174 @@ RETRYABLE_EXCEPTIONS = (
     httpx.ReadTimeout,
     httpx.WriteTimeout,
 )
+
+
+class CircuitState(str, enum.Enum):
+    """Lifecycle states for the circuit breaker."""
+
+    CLOSED = "CLOSED"
+    OPEN = "OPEN"
+    HALF_OPEN = "HALF_OPEN"
+
+
+class CircuitBreaker:
+    """Thread-safe circuit breaker to prevent cascading failures."""
+
+    def __init__(
+        self,
+        failure_threshold: int = 5,
+        recovery_time: float = 30.0,
+        enabled: bool = False,
+    ) -> None:
+        self.failure_threshold = failure_threshold
+        self.recovery_time = recovery_time
+        self.enabled = enabled
+        self._state = CircuitState.CLOSED
+        self._consecutive_failures = 0
+        self._last_failure_time = 0.0
+        self._lock = threading.Lock()
+
+    @property
+    def state(self) -> CircuitState:
+        with self._lock:
+            if (
+                self._state == CircuitState.OPEN
+                and (time.time() - self._last_failure_time) >= self.recovery_time
+            ):
+                self._state = CircuitState.HALF_OPEN
+            return self._state
+
+    def check_state(self) -> None:
+        if not self.enabled:
+            return
+        if self.state == CircuitState.OPEN:
+            msg = (
+                f"Circuit breaker is OPEN. Upstream server failed {self._consecutive_failures} "
+                f"requests. Fast-failing until recovery window ({self.recovery_time}s) expires."
+            )
+            raise CircuitBreakerOpenError(msg)
+
+    def record_success(self) -> None:
+        if not self.enabled:
+            return
+        with self._lock:
+            self._consecutive_failures = 0
+            self._state = CircuitState.CLOSED
+
+    def record_failure(self) -> None:
+        if not self.enabled:
+            return
+        with self._lock:
+            self._consecutive_failures += 1
+            self._last_failure_time = time.time()
+            if self._consecutive_failures >= self.failure_threshold:
+                self._state = CircuitState.OPEN
+
+
+def _create_ssl_context(
+    verify: bool = True,
+    ca_bundle: str | None = None,
+    min_tls_version: str = "TLSv1_2",
+) -> ssl.SSLContext | bool:
+    """Create a hardened SSLContext with enforced minimum TLS version."""
+    if not verify:
+        return False
+
+    ctx = ssl.create_default_context(cafile=ca_bundle)
+    version_map = {
+        "TLSv1_2": ssl.TLSVersion.TLSv1_2,
+        "TLSv1_3": ssl.TLSVersion.TLSv1_3,
+    }
+    ctx.minimum_version = version_map.get(min_tls_version, ssl.TLSVersion.TLSv1_2)
+    return ctx
+
+
+def _validate_target_url(url: str, allow_private_ips: bool, allow_localhost: bool) -> None:
+    """Inspect destination URL to mitigate Server-Side Request Forgery (SSRF)."""
+    parsed = urllib.parse.urlsplit(url)
+    scheme = parsed.scheme.lower()
+    if scheme not in ("http", "https"):
+        raise SSRFError(
+            f"Disallowed URL scheme '{parsed.scheme}'. Only 'http' and 'https' are permitted."
+        )
+
+    hostname = parsed.hostname
+    if not hostname:
+        raise SSRFError(f"URL '{url}' does not contain a valid hostname.")
+
+    hostname_lower = hostname.lower()
+
+    if hostname_lower in ("localhost", "testserver"):
+        if not allow_localhost:
+            raise SSRFError(f"Requests to localhost '{hostname}' are blocked.")
+        return
+
+    if not allow_private_ips and hostname_lower in (
+        "metadata.google.internal",
+        "instance-data",
+        "metadata.azure.com",
+    ):
+        raise SSRFError(f"Requests to cloud metadata endpoint '{hostname}' are blocked.")
+
+    try:
+        ip = ipaddress.ip_address(hostname)
+        is_ip = True
+    except ValueError:
+        is_ip = False
+
+    if is_ip:
+        if ip.is_loopback:
+            if not allow_localhost:
+                raise SSRFError(f"Requests to loopback IP '{ip}' are blocked.")
+            return
+        if not allow_private_ips and (
+            ip.is_private or ip.is_link_local or ip.is_reserved or ip.is_multicast
+        ):
+            raise SSRFError(f"Requests to private or reserved IP '{ip}' are blocked.")
+        return
+
+    if not allow_private_ips:
+        try:
+            resolved_ip_str = socket.gethostbyname(hostname)
+            resolved_ip = ipaddress.ip_address(resolved_ip_str)
+            if resolved_ip.is_loopback and not allow_localhost:
+                raise SSRFError(
+                    f"DNS resolution for '{hostname}' resolved to loopback IP '{resolved_ip}'."
+                )
+            if (
+                resolved_ip.is_private
+                or resolved_ip.is_link_local
+                or resolved_ip.is_reserved
+                or resolved_ip.is_multicast
+            ):
+                msg = f"DNS for '{hostname}' resolved to private/reserved IP '{resolved_ip}'."
+                raise SSRFError(msg)
+        except (socket.gaierror, OSError):
+            pass
+
+
+def _validate_header_injection(headers: dict[str, str]) -> None:
+    """Validate headers to mitigate CRLF header injection and request splitting."""
+    for k, v in headers.items():
+        if "\r" in k or "\n" in k or "\r" in v or "\n" in v:
+            raise SecurityError(f"CRLF control character detected in header '{k}'.")
+
+
+def _check_payload_size(response: httpx.Response, max_bytes: int) -> None:
+    """Validate that the response body does not exceed maximum allowable bytes."""
+    content_length = response.headers.get("Content-Length")
+    if content_length is not None:
+        try:
+            cl = int(content_length)
+            if cl > max_bytes:
+                msg = f"Response Content-Length ({cl} bytes) exceeds limit ({max_bytes} bytes)."
+                raise PayloadTooLargeError(msg)
+        except ValueError:
+            pass
+
+    if len(response.content) > max_bytes:
+        msg = f"Response body ({len(response.content)} bytes) exceeds limit ({max_bytes} bytes)."
+        raise PayloadTooLargeError(msg)
 
 
 def _is_same_origin(url_a: str, url_b: str) -> bool:
@@ -186,12 +363,23 @@ class SyncTransport:
         client: httpx.Client | None = None,
     ) -> None:
         self.config = config
+        ssl_ctx = _create_ssl_context(
+            verify=config.verify_ssl,
+            ca_bundle=config.ssl_ca_bundle,
+            min_tls_version=config.ssl_min_version,
+        )
         self._client = client or httpx.Client(
             base_url=config.base_url,
-            timeout=config.timeout,
+            timeout=config.get_timeout(),
             headers=config.get_headers(),
+            verify=ssl_ctx,
         )
         self._owns_client = client is None
+        self._circuit_breaker = CircuitBreaker(
+            failure_threshold=config.circuit_breaker_failure_threshold,
+            recovery_time=config.circuit_breaker_recovery_time,
+            enabled=config.circuit_breaker_enabled,
+        )
 
     def close(self) -> None:
         """Close the underlying HTTP client."""
@@ -208,12 +396,20 @@ class SyncTransport:
         timeout: float | None = None,
     ) -> Any:
         """Execute a sync HTTP request with exponential backoff retries."""
-        req_headers = dict(headers or {})
-        req_params = dict(params or {})
+        if path.startswith("//"):
+            raise SSRFError("Protocol-relative URLs starting with '//' are disallowed.")
 
-        req_timeout = timeout or self.config.timeout
+        req_headers = dict(headers or {})
+        _validate_header_injection(req_headers)
+
+        req_params = dict(params or {})
+        req_timeout = timeout if timeout is not None else self.config.get_timeout()
+
         is_absolute = path.startswith(("http://", "https://"))
         full_url = path if is_absolute else f"{self.config.base_url.rstrip('/')}/{path.lstrip('/')}"
+
+        _validate_target_url(full_url, self.config.allow_private_ips, self.config.allow_localhost)
+        self._circuit_breaker.check_state()
 
         if not is_absolute or _is_same_origin(full_url, self.config.base_url):
             req_headers, req_params = self.config.auth.apply(req_headers, req_params)
@@ -271,6 +467,12 @@ class SyncTransport:
                     attempt += 1
                     continue
 
+                if response.status_code >= 500:
+                    self._circuit_breaker.record_failure()
+                else:
+                    self._circuit_breaker.record_success()
+
+                _check_payload_size(response, self.config.max_response_bytes)
                 _handle_response_error(response)
                 return _parse_response_data(response)
 
@@ -293,8 +495,10 @@ class SyncTransport:
                     time.sleep(sleep_time)
                     attempt += 1
                     continue
+                self._circuit_breaker.record_failure()
                 raise TimeoutError(f"Request failed after {attempt + 1} attempts: {exc}") from exc
             except httpx.TimeoutException as exc:
+                self._circuit_breaker.record_failure()
                 raise TimeoutError(f"Request timed out: {exc}") from exc
 
 
@@ -307,12 +511,23 @@ class AsyncTransport:
         client: httpx.AsyncClient | None = None,
     ) -> None:
         self.config = config
+        ssl_ctx = _create_ssl_context(
+            verify=config.verify_ssl,
+            ca_bundle=config.ssl_ca_bundle,
+            min_tls_version=config.ssl_min_version,
+        )
         self._client = client or httpx.AsyncClient(
             base_url=config.base_url,
-            timeout=config.timeout,
+            timeout=config.get_timeout(),
             headers=config.get_headers(),
+            verify=ssl_ctx,
         )
         self._owns_client = client is None
+        self._circuit_breaker = CircuitBreaker(
+            failure_threshold=config.circuit_breaker_failure_threshold,
+            recovery_time=config.circuit_breaker_recovery_time,
+            enabled=config.circuit_breaker_enabled,
+        )
 
     async def aclose(self) -> None:
         """Close the underlying async HTTP client."""
@@ -329,12 +544,20 @@ class AsyncTransport:
         timeout: float | None = None,
     ) -> Any:
         """Execute an async HTTP request with exponential backoff retries."""
-        req_headers = dict(headers or {})
-        req_params = dict(params or {})
+        if path.startswith("//"):
+            raise SSRFError("Protocol-relative URLs starting with '//' are disallowed.")
 
-        req_timeout = timeout or self.config.timeout
+        req_headers = dict(headers or {})
+        _validate_header_injection(req_headers)
+
+        req_params = dict(params or {})
+        req_timeout = timeout if timeout is not None else self.config.get_timeout()
+
         is_absolute = path.startswith(("http://", "https://"))
         full_url = path if is_absolute else f"{self.config.base_url.rstrip('/')}/{path.lstrip('/')}"
+
+        _validate_target_url(full_url, self.config.allow_private_ips, self.config.allow_localhost)
+        self._circuit_breaker.check_state()
 
         if not is_absolute or _is_same_origin(full_url, self.config.base_url):
             req_headers, req_params = self.config.auth.apply(req_headers, req_params)
@@ -394,6 +617,12 @@ class AsyncTransport:
                     attempt += 1
                     continue
 
+                if response.status_code >= 500:
+                    self._circuit_breaker.record_failure()
+                else:
+                    self._circuit_breaker.record_success()
+
+                _check_payload_size(response, self.config.max_response_bytes)
                 _handle_response_error(response)
                 return _parse_response_data(response)
 
@@ -416,6 +645,8 @@ class AsyncTransport:
                     await asyncio.sleep(sleep_time)
                     attempt += 1
                     continue
+                self._circuit_breaker.record_failure()
                 raise TimeoutError(f"Request failed after {attempt + 1} attempts: {exc}") from exc
             except httpx.TimeoutException as exc:
+                self._circuit_breaker.record_failure()
                 raise TimeoutError(f"Request timed out: {exc}") from exc

@@ -111,3 +111,80 @@ def test_config_bounds_validation() -> None:
 
     with pytest.raises(ValueError, match="max_retries must be non-negative"):
         ClientConfig(max_retries=-1)
+
+    with pytest.raises(ValueError, match="max_response_bytes must be positive"):
+        ClientConfig(max_response_bytes=0)
+
+    with pytest.raises(ValueError, match="connect_timeout must be positive"):
+        ClientConfig(connect_timeout=-1.0)
+
+    with pytest.raises(ValueError, match="read_timeout must be positive"):
+        ClientConfig(read_timeout=0.0)
+
+    with pytest.raises(ValueError, match="write_timeout must be positive"):
+        ClientConfig(write_timeout=-2.0)
+
+    with pytest.raises(ValueError, match="pool_timeout must be positive"):
+        ClientConfig(pool_timeout=0.0)
+
+    with pytest.raises(ValueError, match="circuit_breaker_failure_threshold must be > 0"):
+        ClientConfig(circuit_breaker_failure_threshold=0)
+
+    with pytest.raises(ValueError, match="circuit_breaker_recovery_time must be > 0"):
+        ClientConfig(circuit_breaker_recovery_time=-5.0)
+
+    with pytest.raises(ValueError, match="ssl_min_version must be 'TLSv1_2' or 'TLSv1_3'"):
+        ClientConfig(ssl_min_version="TLSv1_0")
+
+    with pytest.raises(ValueError, match="contains CRLF control characters"):
+        ClientConfig(headers={"Injected\r\nHeader": "val"})
+
+    with pytest.raises(ValueError, match="contains CRLF control characters"):
+        ClientConfig(headers={"X-Test": "val\nNewline"})
+
+
+def test_config_granular_timeouts() -> None:
+    config = ClientConfig(
+        timeout=25.0,
+        connect_timeout=3.0,
+        read_timeout=15.0,
+        write_timeout=8.0,
+        pool_timeout=4.0,
+    )
+    t = config.get_timeout()
+    assert t.connect == 3.0
+    assert t.read == 15.0
+    assert t.write == 8.0
+    assert t.pool == 4.0
+
+
+def test_config_security_overrides() -> None:
+    base = ClientConfig()
+    overridden = base.with_overrides(
+        max_response_bytes=2048,
+        allow_private_ips=True,
+        allow_localhost=False,
+        connect_timeout=2.0,
+        read_timeout=10.0,
+        write_timeout=5.0,
+        pool_timeout=2.0,
+        circuit_breaker_enabled=True,
+        circuit_breaker_failure_threshold=10,
+        circuit_breaker_recovery_time=60.0,
+        verify_ssl=False,
+        ssl_ca_bundle="/path/to/bundle.crt",
+        ssl_min_version="TLSv1_3",
+    )
+    assert overridden.max_response_bytes == 2048
+    assert overridden.allow_private_ips is True
+    assert overridden.allow_localhost is False
+    assert overridden.connect_timeout == 2.0
+    assert overridden.read_timeout == 10.0
+    assert overridden.write_timeout == 5.0
+    assert overridden.pool_timeout == 2.0
+    assert overridden.circuit_breaker_enabled is True
+    assert overridden.circuit_breaker_failure_threshold == 10
+    assert overridden.circuit_breaker_recovery_time == 60.0
+    assert overridden.verify_ssl is False
+    assert overridden.ssl_ca_bundle == "/path/to/bundle.crt"
+    assert overridden.ssl_min_version == "TLSv1_3"

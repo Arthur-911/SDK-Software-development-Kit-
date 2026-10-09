@@ -4,6 +4,18 @@ All notable changes to this project will be documented in this file.
 
 The format is based on Keep a Changelog, and this project adheres to Semantic Versioning.
 
+## [0.1.2] - 2026-10-09
+
+### Security & Hardening
+- **SSRF & Metadata Guard (CWE-918)**: Blocked outbound requests to private network ranges (`10.0.0.0/8`, `172.16.0.0/12`, `192.168.0.0/16`), link-local IPs (`169.254.0.0/16`), cloud metadata services (`169.254.169.254`, `metadata.google.internal`), and protocol-relative URLs (`//`). Configurable via `allow_private_ips` and `allow_localhost`.
+- **Response Memory Cap & Decompression Bomb Protection (CWE-400)**: Added `max_response_bytes` enforcement against oversized payload bodies and gzip bombs.
+- **Circuit Breaker Pattern**: Integrated a fail-fast circuit breaker mechanism across sync and async transports (`circuit_breaker_enabled`) to eliminate thundering herd retries during severe server outages.
+- **Granular Timeout Controls**: Added distinct configuration options for `connect_timeout`, `read_timeout`, `write_timeout`, and `pool_timeout` to defend against Slowloris socket hanging.
+- **Strict TLS 1.2+ & Custom CA Support (CWE-326)**: Mandated minimum TLS version (TLS 1.2) by default and added custom CA bundle support (`ssl_ca_bundle`).
+- **CRLF Header Injection Protection (CWE-113)**: Added validation rejecting `\r` and `\n` characters in custom HTTP headers.
+
+---
+
 ## [0.1.1] - 2026-10-06
 
 ### Security & Hardening

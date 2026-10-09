@@ -262,3 +262,57 @@ async def test_async_client_paginate() -> None:
         async for item in server.paginate("/async-bad"):
             bad_items.append(item)
         assert bad_items == []
+
+
+def test_client_security_init() -> None:
+    client = ServerClient(
+        base_url="https://api.example.com",
+        max_response_bytes=4096,
+        allow_private_ips=True,
+        allow_localhost=False,
+        connect_timeout=2.0,
+        read_timeout=10.0,
+        write_timeout=5.0,
+        pool_timeout=1.0,
+        circuit_breaker_enabled=True,
+        circuit_breaker_failure_threshold=3,
+        circuit_breaker_recovery_time=15.0,
+        verify_ssl=False,
+        ssl_ca_bundle="/path/to/ca.pem",
+        ssl_min_version="TLSv1_3",
+        http_client=httpx.Client(transport=httpx.MockTransport(lambda r: httpx.Response(200))),
+    )
+    assert client.config.max_response_bytes == 4096
+    assert client.config.allow_private_ips is True
+    assert client.config.allow_localhost is False
+    assert client.config.connect_timeout == 2.0
+    assert client.config.circuit_breaker_enabled is True
+    assert client.config.verify_ssl is False
+    client.close()
+
+
+@pytest.mark.asyncio
+async def test_async_client_security_init() -> None:
+    client = AsyncServerClient(
+        base_url="https://api.example.com",
+        max_response_bytes=4096,
+        allow_private_ips=True,
+        allow_localhost=False,
+        connect_timeout=2.0,
+        read_timeout=10.0,
+        write_timeout=5.0,
+        pool_timeout=1.0,
+        circuit_breaker_enabled=True,
+        circuit_breaker_failure_threshold=3,
+        circuit_breaker_recovery_time=15.0,
+        verify_ssl=False,
+        ssl_ca_bundle="/path/to/ca.pem",
+        ssl_min_version="TLSv1_3",
+        http_client=httpx.AsyncClient(transport=httpx.MockTransport(lambda r: httpx.Response(200))),
+    )
+    assert client.config.max_response_bytes == 4096
+    assert client.config.allow_private_ips is True
+    assert client.config.allow_localhost is False
+    assert client.config.circuit_breaker_enabled is True
+    assert client.config.verify_ssl is False
+    await client.aclose()

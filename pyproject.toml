@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "server-sdk"
-version = "0.1.1"
+version = "0.1.2"
 description = "A typed, resilient Python Server Developer Kit for backend services and REST APIs."
 readme = "README.md"
 requires-python = ">=3.9"
