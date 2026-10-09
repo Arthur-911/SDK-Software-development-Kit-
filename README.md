@@ -1,6 +1,6 @@
-# 🚀 Server Developer Kit (server-sdk)
+# Server Developer Kit (server-sdk)
 
-> **A friendly, resilient, and ultra-secure Python messenger for talking to backend servers and REST APIs.**
+> A resilient, typed, and secure Python client library for connecting to backend REST servers and microservices.
 
 [![CI](https://img.shields.io/badge/CI-Passing-2ea44f?style=flat-square&logo=githubactions&logoColor=white)](https://github.com/Arthur-911/SDK-Software-development-Kit-/actions)
 [![Coverage](https://img.shields.io/badge/Coverage-100%25-brightgreen?style=flat-square)](https://github.com/Arthur-911/SDK-Software-development-Kit-)
@@ -11,36 +11,39 @@
 
 ---
 
-## 💡 What is this? (In Plain English)
+## Overview
 
-Whenever your Python program needs to talk to a website or backend server, things can get tricky:
-- You have to remember passwords, API keys, and headers for every single request.
-- If the server has a tiny connection hiccup or asks you to wait 2 seconds, your script might immediately crash.
-- Hackers can trick applications into leaking private cloud keys or sending giant files that freeze your computer.
+When building applications that communicate with backend APIs or microservices, managing raw HTTP calls quickly leads to repetitive boilerplate code:
+- Authentication headers must be manually injected into every request.
+- Network blips or rate limits (HTTP 429) can crash scripts unless retry logic is written from scratch.
+- Untrusted endpoints can expose applications to security risks like Server-Side Request Forgery (SSRF) or out-of-memory crashes from oversized payloads.
 
-**Think of this library as your smart Helper Robot 🤖.**  
-Instead of writing dozens of lines of repetitive code, you give your robot your destination and password once. It handles the talking, waits patiently if the server is busy, defends your app against malicious input, and hands you back clean, organized results.
-
----
-
-## ✨ Key Superpowers
-
-- 🛡️ **Built-in Security Armor:** Blocks attacks targeting private cloud metadata (SSRF guard), stops decompression bombs from freezing memory, and enforces strict TLS 1.2+ encryption.
-- 🔁 **Automatic Patience (Retries):** If the server is temporarily overloaded (HTTP 429) or blips for a moment (5xx), the SDK waits and tries again automatically without crashing.
-- ⚡ **Circuit Breaker:** If the remote server completely crashes, the client fails fast so your application doesn't freeze waiting for a dead server.
-- 🪪 **Pluggable Passwords:** Easily use Bearer tokens (JWT), API Keys, or Basic Auth in just 1 line.
-- 🏎️ **Fast & Flexible:** Works synchronously for simple scripts, or asynchronously (`async`/`await`) for high-speed apps like FastAPI.
-- 📦 **Clean Output:** Automatically turns messy server replies into neat, verified Python objects using Pydantic.
+Server SDK solves these challenges by providing a standardized, production-ready client layer. You configure your connection settings and credentials once, and the library manages request lifecycles, automatic retries with exponential backoff, payload validation, and active security protections.
 
 ---
 
-## 📦 Installation
+## Key Features
+
+- **Built-in Security Defenses:** Active protection against Server-Side Request Forgery (SSRF), response payload size limits, CRLF header injection guards, and strict TLS 1.2+ encryption.
+- **Resilient Retry Engine:** Automatically handles transient network drops and rate limits (HTTP 429 / 5xx) with exponential backoff and randomized jitter.
+- **Fail-Fast Circuit Breaker:** Detects sustained upstream outages and prevents retry storms by failing fast until the recovery window elapses.
+- **Flexible Authentication:** Native support for Bearer tokens (JWT / OAuth2), API keys, and HTTP Basic authentication.
+- **Synchronous and Asynchronous:** Offers both `ServerClient` for scripts and `AsyncServerClient` for high-throughput frameworks like FastAPI.
+- **Typed Response Parsing:** Direct integration with Pydantic models for structured, validated Python data.
+- **Seamless Pagination:** Built-in iterators to navigate multi-page API responses effortlessly.
+
+---
+
+## Installation
+
+Install directly from GitHub:
 
 ```bash
 pip install git+https://github.com/Arthur-911/SDK-Software-development-Kit-.git
 ```
 
 Or install locally for development:
+
 ```bash
 git clone https://github.com/Arthur-911/SDK-Software-development-Kit-.git
 cd SDK-Software-development-Kit-
@@ -49,47 +52,48 @@ pip install -e ".[dev]"
 
 ---
 
-## ⚡ Quickstart (2-Minute Guide)
+## Quickstart
 
-### 1. Simple Request (Sync)
+### Synchronous Client
+
 ```python
 from server_sdk import BearerAuth, ServerClient
 
-# 1. Connect to any server
-with ServerClient(base_url="https://api.example.com", auth=BearerAuth("my-secret-token")) as client:
-    # 2. Check if the server is online
-    status = client.health.check()
-    print(f"Server status: {status.status}")
+with ServerClient(base_url="https://api.example.com", auth=BearerAuth("your-token")) as client:
+    # Check server health
+    health = client.health.check()
+    print(f"Status: {health.status}")
 
-    # 3. Fetch data (GET)
+    # Standard GET request
     users = client.get("/users")
     print(users)
 ```
 
-### 2. High-Speed Parallel Requests (Async)
-Need to fetch multiple endpoints at the same time without waiting? Use `AsyncServerClient`:
+### Asynchronous Client
+
+For concurrent operations and modern async frameworks:
 
 ```python
 import asyncio
 from server_sdk import AsyncServerClient, BearerAuth
 
 async def main():
-    async with AsyncServerClient(base_url="https://api.example.com", auth=BearerAuth("token")) as client:
-        # Fetch profile and settings at the exact same time!
+    async with AsyncServerClient(base_url="https://api.example.com", auth=BearerAuth("your-token")) as client:
+        # Fetch multiple endpoints concurrently
         profile_task = client.get("/profile")
         settings_task = client.get("/settings")
 
         profile, settings = await asyncio.gather(profile_task, settings_task)
-        print("Done:", profile, settings)
+        print("Results:", profile, settings)
 
 asyncio.run(main())
 ```
 
 ---
 
-## 🪪 Easy Authentication
+## Authentication Methods
 
-Never copy-paste secret headers manually again:
+Configure authentication once at client initialization:
 
 ```python
 from server_sdk import ApiKeyAuth, BasicAuth, BearerAuth, NoAuth, ServerClient
@@ -97,46 +101,46 @@ from server_sdk import ApiKeyAuth, BasicAuth, BearerAuth, NoAuth, ServerClient
 # 1. Bearer Token (JWT / OAuth2)
 client = ServerClient(base_url="https://api.example.com", auth=BearerAuth("your-jwt-token"))
 
-# 2. API Key Header (X-API-Key)
-client = ServerClient(base_url="https://api.example.com", auth=ApiKeyAuth("my-api-key"))
+# 2. API Key via Header (Default: X-API-Key)
+client = ServerClient(base_url="https://api.example.com", auth=ApiKeyAuth("your-api-key"))
 
-# 3. Username & Password (Basic Auth)
-client = ServerClient(base_url="https://api.example.com", auth=BasicAuth("alice", "secret123"))
+# 3. HTTP Basic Authentication
+client = ServerClient(base_url="https://api.example.com", auth=BasicAuth("username", "password"))
 
-# 4. Public Server (No login needed)
+# 4. Public Endpoints (No Authentication)
 client = ServerClient(base_url="https://api.example.com", auth=NoAuth())
 ```
 
 ---
 
-## 🛡️ Built-in Security Shield (How it protects you)
+## Security and Resilience
 
-Most HTTP clients are completely defenseless out of the box. This SDK comes with enterprise security turned on by default:
+The SDK includes defensive safeguards designed to prevent common web client vulnerabilities:
 
-| Security Shield | What it prevents |
+| Protection | Purpose |
 | :--- | :--- |
-| **SSRF & Cloud Key Guard** | Stops malicious requests from accessing internal private IP addresses or cloud metadata (`169.254.169.254`), protecting AWS/GCP/Azure credentials from theft. |
-| **Memory Cap (OOM Guard)** | Rejects giant files or compressed "zip-bombs" (`max_response_bytes`) before they crash your computer. |
-| **Circuit Breaker** | If the remote server crashes, your app stops hammering it with retries and fails fast instead of freezing. |
-| **Log Sanitizer** | Automatically hides passwords and API keys with `[REDACTED]` so they never leak into log files. |
-| **Anti-Slowloris Timeouts** | Granular timeouts (`connect`, `read`, `write`, `pool`) so a slow or stalling server cannot hold your app hostage. |
-| **Strict TLS 1.2+** | Enforces strong modern encryption and supports custom corporate root certificates (`ssl_ca_bundle`). |
+| **SSRF & Metadata Guard** | Blocks outbound requests targeting internal IP ranges (`10.0.0.0/8`, `172.16.0.0/12`, `192.168.0.0/16`), link-local addresses, and cloud metadata services (`169.254.169.254`). |
+| **Memory Protection** | Enforces maximum payload size limits (`max_response_bytes`) to prevent memory exhaustion and decompression bombs. |
+| **Circuit Breaker** | Automatically halts requests to failing services after repeated 5xx errors to prevent cascading failures. |
+| **Log Sanitization** | Automatically redacts sensitive parameter keys (`api_key`, `token`, `secret`, `password`) in debug logging. |
+| **Granular Timeouts** | Individual timeout controls for connection, read, write, and connection pool operations. |
+| **Strict TLS Standards** | Mandates modern TLS 1.2+ encryption by default and allows configuring custom enterprise Certificate Authority (CA) bundles. |
 
-### Customizing Security Settings
+### Security Configuration Example
 
 ```python
 from server_sdk import ServerClient
 
 client = ServerClient(
     base_url="https://api.example.com",
-    # Block requests to private home/office LANs and cloud metadata:
+    # Disallow requests to private and cloud metadata addresses
     allow_private_ips=False,
-    # Stop downloading if a response exceeds 5 MB:
+    # Cap response size to 5 MB
     max_response_bytes=5 * 1024 * 1024,
-    # Fail fast after 5 consecutive server crashes:
+    # Trip circuit breaker after 5 consecutive failures
     circuit_breaker_enabled=True,
     circuit_breaker_failure_threshold=5,
-    # Separate timeouts for connecting vs reading data:
+    # Granular timeout settings
     connect_timeout=3.0,
     read_timeout=15.0,
 )
@@ -144,51 +148,55 @@ client = ServerClient(
 
 ---
 
-## 📚 More Useful Features
+## Additional Features
 
-### 1. Automatic Pagination (Looping through multiple pages)
+### Automatic Pagination
+
+Navigate paginated endpoints without manually managing page tokens or query parameters:
+
 ```python
 with ServerClient(base_url="https://api.example.com") as client:
-    # Automatically pulls page 1, page 2, page 3...
     for user in client.paginate("/users", page_size=50, max_pages=5):
         print(user["name"])
 ```
 
-### 2. Auto-converting into Typed Models (Pydantic)
+### Typed Models with Pydantic
+
+Parse incoming JSON responses directly into validated Pydantic models:
+
 ```python
 from pydantic import BaseModel
 from server_sdk import ServerClient
 
-class User(BaseModel):
+class UserModel(BaseModel):
     id: int
     name: str
 
 with ServerClient(base_url="https://api.example.com") as client:
-    # Automatically validates and turns raw JSON into a Python User object
-    user = client.get("/users/1", response_model=User)
+    user = client.get("/users/1", response_model=UserModel)
     print(user.name)
 ```
 
 ---
 
-## 🧪 Testing & Verification
+## Testing
 
-This project maintains **100% test coverage** with zero compromises:
+The codebase includes an automated test suite with 100% line and branch coverage:
 
 ```bash
-# Run all tests (75 unit & integration tests)
+# Run unit and integration tests
 pytest
 
-# Verify code styling & formatting
+# Code style and linting
 ruff check src tests
 ruff format --check src tests
 
-# Verify strict type safety
+# Static type verification
 mypy src tests
 ```
 
 ---
 
-## 📄 License
+## License
 
 This project is licensed under the [MIT License](LICENSE).
